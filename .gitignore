@@ -1,0 +1,19 @@
+# ~/websites/nibal-ink/.gitignore
+
+# Secretos y variables de entorno (CRITICO)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Frontend (Node)
+frontend_nibal-ink/node_modules/
+frontend_nibal-ink/dist/
+
+# Backend (Python)
+backend_nibal-ink/__pycache__/
+backend_nibal-ink/venv/
+backend_nibal-ink/.pytest_cache/
+backend_nibal-ink/*.pyc
+
+# OS
+.DS_Store
