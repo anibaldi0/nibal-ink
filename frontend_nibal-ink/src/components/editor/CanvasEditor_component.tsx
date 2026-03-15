@@ -1,4 +1,6 @@
 // src/components/editor/CanvasEditor_component.tsx
+
+import { designService } from '../../services/api_service';
 import React, { useEffect, useRef } from 'react';
 import { fabric } from 'fabric'; 
 import { useDesignStore } from '../../store/useDesignStore';
@@ -6,58 +8,56 @@ import { useDesignStore } from '../../store/useDesignStore';
 const CanvasEditor = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricCanvas = useRef<fabric.Canvas | null>(null);
-  const { setDesignImage } = useDesignStore();
+  const { designImage, setDesignImage } = useDesignStore(); // Traemos designImage para enviarlo
 
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    // Inicializamos el Canvas con tus medidas base
     fabricCanvas.current = new fabric.Canvas(canvasRef.current, {
       width: 500,
       height: 225,
       backgroundColor: '#ffffff',
     });
 
-    // --- CREACION DEL MARCO DE SEGURIDAD (RED FRAME) ---
-    // Calculamos el ancho y alto interno restando los margenes
-    // Ancho: 500 - 50 (left) - 25 (right) = 425
-    // Alto: 225 - 25 (top) - 50 (bottom) = 150
     const safetyFrame = new fabric.Rect({
-      left: 50,           // Margen Left: 20mm
-      top: 25,            // Margen Top: 10mm
-      width: 400,         // Area util horizontal
-      height: 170,        // Area util vertical
+      left: 50,
+      top: 25,
+      width: 400,
+      height: 170,
       fill: 'transparent',
-      stroke: 'red',      // Color solicitado
+      stroke: 'red',
       strokeWidth: 3,
-      strokeDashArray: [5, 5], // Linea punteada para que no sea invasiva
-      selectable: false,  // El usuario no puede moverlo
-      evented: false,     // El usuario no puede interactuar con el
+      strokeDashArray: [5, 5],
+      selectable: false,
+      evented: false,
       opacity: 1
     });
 
     fabricCanvas.current.add(safetyFrame);
-    // --------------------------------------------------
 
     const updateStore = () => {
       if (!fabricCanvas.current) return;
       
-      // Antes de exportar la imagen para el 3D o el pedido,
-      // ocultamos el marco rojo para que no salga impreso en la taza.
-      safetyFrame.set('visible', false);
+      const objects = fabricCanvas.current.getObjects();
+      const sFrame = objects.find(obj => obj.stroke === 'red'); 
+      
+      if (sFrame) sFrame.set('visible', false);
       fabricCanvas.current.renderAll();
 
-      const dataURL = fabricCanvas.current.toDataURL({
+      const croppedDataURL = fabricCanvas.current.toDataURL({
         format: 'webp',
-        quality: 0.8,
-        multiplier: 1,
+        quality: 0.9,
+        multiplier: 2,
+        left: 50,
+        top: 25,
+        width: 400,
+        height: 170,
       });
 
-      // Volvemos a mostrar el marco para el usuario en el editor
-      safetyFrame.set('visible', true);
+      if (sFrame) sFrame.set('visible', true);
       fabricCanvas.current.renderAll();
 
-      setDesignImage(dataURL);
+      setDesignImage(croppedDataURL);
     };
 
     fabricCanvas.current.on('object:modified', updateStore);
@@ -68,6 +68,20 @@ const CanvasEditor = () => {
       fabricCanvas.current?.dispose();
     };
   }, [setDesignImage]);
+
+  // --- FUNCION PARA ENVIAR A LA BEELINK ---
+  const handleConfirmarPedido = async () => {
+    if (!designImage) {
+      alert("No hay diseño para enviar");
+      return;
+    }
+    try {
+      const res = await designService.upload(designImage);
+      alert(`Exito: ${res.message}`);
+    } catch (err) {
+      alert("Error al conectar con FastAPI en la Beelink");
+    }
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -100,10 +114,20 @@ const CanvasEditor = () => {
         <canvas ref={canvasRef} />
       </div>
 
-      <label className="cursor-pointer bg-blue-600 hover:bg-red-500 text-white px-8 py-3 rounded-full font-bold transition-all shadow-lg active:scale-95">
-        SUBIR LOGO
-        <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-      </label>
+      <div className="flex gap-4">
+        <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-full font-bold transition-all shadow-lg active:scale-95">
+          SUBIR LOGO
+          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+        </label>
+
+        {/* BOTON DE ENVIO REAL */}
+        <button 
+          onClick={handleConfirmarPedido}
+          className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-full font-bold transition-all shadow-lg active:scale-95"
+        >
+          CONFIRMAR PEDIDO
+        </button>
+      </div>
     </div>
   );
 };
