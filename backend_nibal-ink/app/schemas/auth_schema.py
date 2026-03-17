@@ -8,8 +8,9 @@ class TokenSchema(BaseModel):
     token_type: str
 
 class TokenDataSchema(BaseModel):
-    """Datos que viajan dentro del payload del token"""
+    """Datos que viajan dentro del payload del token (Decodificado)"""
     email: Optional[str] = None
+    role: Optional[str] = None  # Agregado para RBAC (Role Based Access Control)
 
 class LoginSchema(BaseModel):
     """Validacion de los datos de entrada para el login"""
