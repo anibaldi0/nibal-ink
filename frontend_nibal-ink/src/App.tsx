@@ -5,6 +5,8 @@ import Footer from './components/layout/Footer_component';
 import LandingPage from './pages/LandingPage_page';
 import AdminDashboard from './pages/AdminDashboard_page';
 import LoginPage from './pages/LoginPage_page';
+import VerifyEmailPage from './pages/VerifyEmail_page';
+import EditorPage from './pages/Editor_page';
 
 function App() {
   return (
@@ -25,6 +27,8 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/verify-email" element={<VerifyEmailPage/>} />
+            <Route path="/editor" element={<EditorPage />} />
           </Routes>
         </div>
 

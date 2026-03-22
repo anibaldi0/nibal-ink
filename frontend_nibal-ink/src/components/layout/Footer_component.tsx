@@ -7,7 +7,25 @@ const Footer = () => {
           
           {/* SECCIÓN IZQUIERDA: INFO - Blanco con opacidad alta para legibilidad */}
           <div className="space-y-2 text-center md:text-left">
-            <h4 className="text-[18px] font-black tracking-widest text-white uppercase">NIBAL.INK</h4>
+            {/* <h4 className="text-[18px] font-black tracking-widest text-white uppercase">NIBAL.INK</h4> */}
+            <img 
+              src="/logo_nibal_blanco_rojo.png" 
+              alt="NIBAL.INK Logo" 
+              className="
+                /* Altura base para moviles */
+                h-12 
+                /* Altura para tablets/laptops medianas */
+                md:h-14 
+                /* Altura para monitores grandes */
+                lg:h-16 
+                /* Mantiene la proporcion y suaviza los bordes */
+                w-auto object-contain 
+                /* Efectos visuales de Nibal.ink */
+                brightness-110 
+                group-hover:drop-shadow-[0_0_12px_rgba(56,189,248,0.6)] 
+                transition-all duration-300
+              "
+            />
             <p className="text-[14px] text-slate-200 font-mono leading-relaxed">
               Laboratorio de prototipado rápido y sublimación digital. 
               Desarrollado para la Tecnicatura Universitaria en Programación - UTN Avellaneda.

@@ -75,21 +75,41 @@ async def verify_email(
 ):
     """
     Endpoint que recibe el click del mail.
+    Corregido para asegurar el commit en la Beelink.
     """
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         email: str = payload.get("sub")
-        if email is None or payload.get("purpose") != "email_verification":
+        purpose: str = payload.get("purpose")
+        
+        if email is None or purpose != "email_verification":
             raise HTTPException(status_code=400, detail="Token invalido o malformado")
     except JWTError:
         raise HTTPException(status_code=400, detail="El link ha expirado o es invalido")
 
-    # Actualizar estado del usuario
-    query = update(UserModel).where(UserModel.email == email).values(is_verified=True)
-    await db.execute(query)
-    await db.commit()
+    # 1. Buscamos al usuario explícitamente
+    result = await db.execute(select(UserModel).where(UserModel.email == email))
+    user = result.scalar_one_or_none()
 
-    return {"status": "success", "message": "Email verificado correctamente. Ya podes operar."}
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado en el nodo")
+
+    # 2. Modificamos el objeto directamente (Esto marca la sesión como 'dirty')
+    if not user.is_verified:
+        user.is_verified = True
+        try:
+            # 3. Forzamos el guardado y confirmamos la transacción
+            await db.commit() 
+            # Opcional: refrescamos para estar seguros
+            await db.refresh(user) 
+        except Exception:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="Error al actualizar la base de datos")
+
+    return {
+        "status": "success", 
+        "message": f"¡Hola {user.full_name}! Email verificado correctamente. Ya podes operar."
+    }
 
 @router.get("/me", response_model=UserResponseSchema)
 async def read_users_me(
