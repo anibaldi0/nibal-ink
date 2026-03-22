@@ -32,18 +32,19 @@ export const authService = {
   },
   
   register: async (email: string, password: string, fullName?: string) => {
-    let finalName = fullName?.trim();
-    if (!finalName) {
-      const alias = email.split('@')[0];
-      finalName = alias.length >= 3 ? alias : `Op-${alias}`;
-    }
-
-    const response = await api.post('users/register', {
-      email: email.trim(),
-      password: password,
-      full_name: finalName 
-    });
-    return response.data;
+      let finalName = fullName?.trim();
+      if (!finalName) {
+          const alias = email.split('@')[0];
+          finalName = alias.length >= 3 ? alias : `Op-${alias}`;
+      }
+      
+      // ENVIAMOS user_name PARA COINCIDIR CON EL BACKEND NORMALIZADO
+      const response = await api.post('users/register', {
+          email: email.trim(),
+          password: password,
+          user_name: finalName 
+      });
+      return response.data;
   }
 };
 

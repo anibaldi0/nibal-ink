@@ -36,7 +36,7 @@ async def register_user(
     
     # 2. Crear instancia
     new_user = UserModel(
-        full_name=user_in.full_name,
+        user_name=user_in.user_name, # Cambiado de full_name a user_name
         email=user_in.email,
         hashed_password=get_password_hash(user_in.password),
         is_active=True,
@@ -108,7 +108,7 @@ async def verify_email(
 
     return {
         "status": "success", 
-        "message": f"¡Hola {user.full_name}! Email verificado correctamente. Ya podes operar."
+        "message": f"¡Hola {user.user_name}! Email verificado correctamente. Ya podes operar."
     }
 
 @router.get("/me", response_model=UserResponseSchema)

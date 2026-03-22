@@ -14,12 +14,12 @@ async def init_database():
     
     async with engine.begin() as conn:
         # Esto crea las tablas si NO existen segun los modelos importados
+        # Al correr esto, SQLAlchemy crea la columna 'user_name' en Postgres
         await conn.run_sync(Base.metadata.create_all)
     
     print("[NINJA-LOG] Tablas creadas con exito.")
     
     async with async_session_factory() as session:
-        # Verificar si ya existe un admin para no duplicar
         from sqlalchemy import select
         result = await session.execute(select(UserModel).where(UserModel.email == "admin@nibal.ink"))
         admin_exists = result.scalar_one_or_none()
@@ -27,14 +27,16 @@ async def init_database():
         if not admin_exists:
             print("[NINJA-LOG] Creando SuperUser inicial...")
             new_admin = UserModel(
-                full_name="Ani Admin",
+                user_name="admin", # NORMALIZADO: Antes era full_name
                 email="admin@nibal.ink",
-                hashed_password=get_password_hash("Cambiame123!"), # Password temporal
-                is_superuser=True
+                hashed_password=get_password_hash("admin1234"),
+                is_superuser=True,
+                is_verified=True, # El admin nace verificado para poder operar
+                role="admin"      # Le asignamos el rol correspondiente
             )
             session.add(new_admin)
             await session.commit()
-            print("[NINJA-LOG] Admin creado: admin@nibal.ink / Cambiame123!")
+            print("[NINJA-LOG] Admin creado: admin@nibal.ink / admin1234")
         else:
             print("[NINJA-LOG] El Admin ya existe, saltando seed.")
 

@@ -1,0 +1,1077 @@
+./app/db/init_db.py
+# backend_nibal-ink/app/db/init_db.py
+import asyncio
+from app.db.session_db import engine
+from app.models.base_model import Base
+from app.models.user_model import UserModel
+from app.db.session_db import async_session_factory
+from app.core.security_core import get_password_hash
+
+async def init_database():
+    """
+    Crea las tablas y genera el primer administrador de sistema.
+    """
+    print("[NINJA-LOG] Iniciando creacion de tablas...")
+    
+    async with engine.begin() as conn:
+        # Esto crea las tablas si NO existen segun los modelos importados
+        await conn.run_sync(Base.metadata.create_all)
+    
+    print("[NINJA-LOG] Tablas creadas con exito.")
+    
+    async with async_session_factory() as session:
+        # Verificar si ya existe un admin para no duplicar
+        from sqlalchemy import select
+        result = await session.execute(select(UserModel).where(UserModel.email == "admin@nibal.ink"))
+        admin_exists = result.scalar_one_or_none()
+        
+        if not admin_exists:
+            print("[NINJA-LOG] Creando SuperUser inicial...")
+            new_admin = UserModel(
+                full_name="Ani Admin",
+                email="admin@nibal.ink",
+                hashed_password=get_password_hash("Cambiame123!"), # Password temporal
+                is_superuser=True
+            )
+            session.add(new_admin)
+            await session.commit()
+            print("[NINJA-LOG] Admin creado: admin@nibal.ink / Cambiame123!")
+        else:
+            print("[NINJA-LOG] El Admin ya existe, saltando seed.")
+
+if __name__ == "__main__":
+    asyncio.run(init_database())
+
+--- END OF FILE ---
+
+./app/db/session_db.py
+# backend_nibal-ink/app/db/session_db.py
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from app.core.config_core import settings
+
+# El motor asincrono. 
+# Usamos str() porque settings.DATABASE_URL es un objeto PostgresDsn de Pydantic
+engine = create_async_engine(
+    str(settings.DATABASE_URL),
+    echo=False,  # Cambiar a True solo para debugear queries SQL pesadas
+    pool_pre_ping=True,
+    future=True
+)
+
+# Fabrica de sesiones asincronas
+async_session_factory = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,  # Crucial para evitar errores de carga diferida en async
+    autocommit=False,
+    autoflush=False
+)
+
+async def get_db_session():
+    """
+    Dependency Injection para FastAPI. 
+    Asegura que cada request tenga su propia sesion y se cierre al finalizar.
+    """
+    async with async_session_factory() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+--- END OF FILE ---
+
+./app/core/security_core.py
+# backend_nibal-ink/app/core/security_core.py
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+--- END OF FILE ---
+
+./app/core/config_core.py
+# backend_nibal-ink/app/core/config_core.py
+from typing import List, Union
+from pydantic import AnyHttpUrl, field_validator, PostgresDsn, EmailStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class ProjectSettings(BaseSettings):
+    """
+    Configuracion centralizada del proyecto nibal.ink.
+    Valida que el .env sea correcto antes de iniciar la app.
+    """
+    
+    # --- PROYECTO ---
+    PROJECT_NAME: str = "nibal.ink API"
+    API_VERSION_STR: str = "/api/v1"
+    FRONTEND_URL: str = "http://localhost:5173" # Agregado para el link del mail
+    
+    # --- SEGURIDAD ---
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
+    
+    # --- BASE DE DATOS ---
+    DATABASE_URL: PostgresDsn
+    
+    # --- CONFIGURACION DE EMAIL (NUEVO) ---
+    # Declaramos estos campos para que Pydantic los busque en el .env
+    MAIL_USERNAME: str
+    MAIL_PASSWORD: str
+    MAIL_FROM: EmailStr
+    MAIL_PORT: int = 587
+    MAIL_SERVER: str = "smtp.gmail.com"
+    MAIL_FROM_NAME: str = "NIBAL.INK Admin"
+    MAIL_STARTTLS: bool = True
+    MAIL_SSL_TLS: bool = False
+    USE_CREDENTIALS: bool = True
+
+    # --- CORS ---
+    CORS_ORIGINS_LIST: Union[List[AnyHttpUrl], str] = []
+
+    @field_validator("CORS_ORIGINS_LIST", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, value: Union[str, List[str]]) -> List[str]:
+        if isinstance(value, str) and not value.startswith("["):
+            return [origin.strip() for origin in value.split(",")]
+        elif isinstance(value, (list, str)):
+            return value
+        return []
+
+    model_config = SettingsConfigDict(
+        env_file=".env", 
+        case_sensitive=True,
+        env_file_encoding="utf-8",
+        extra="ignore" 
+    )
+
+settings = ProjectSettings()
+--- END OF FILE ---
+
+./app/services/auth_service.py
+# backend_nibal-ink/app/services/auth_service.py
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from jose import jwt
+from app.core.config_core import settings
+from app.core.security_core import pwd_context
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """
+    Genera un JWT firmado con el secret key.
+    """
+    to_encode = data.copy()
+    
+    # Calculamos la expiración
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    to_encode.update({"exp": expire})
+    
+    # Generamos el token usando las constantes de tu config_core
+    encoded_jwt = jwt.encode(
+        to_encode, 
+        settings.JWT_SECRET_KEY, 
+        algorithm=settings.JWT_ALGORITHM
+    )
+    return encoded_jwt
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Compara el texto plano con el hash de la DB"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    """
+    Transforma la contraseña plana en un hash irreversible.
+    Uso: Antes de guardar en la DB durante el registro.
+    """
+    return pwd_context.hash(password)
+--- END OF FILE ---
+
+./app/services/mail_service.py
+# backend_nibal-ink/app/services/mail_service.py
+from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
+from app.core.config_core import settings
+from pydantic import EmailStr
+
+conf = ConnectionConfig(
+    MAIL_USERNAME=settings.MAIL_USERNAME,
+    MAIL_PASSWORD=settings.MAIL_PASSWORD,
+    MAIL_FROM=settings.MAIL_FROM,
+    MAIL_PORT=settings.MAIL_PORT,
+    MAIL_SERVER=settings.MAIL_SERVER,
+    MAIL_FROM_NAME=settings.MAIL_FROM_NAME,
+    MAIL_STARTTLS=settings.MAIL_STARTTLS,
+    MAIL_SSL_TLS=settings.MAIL_SSL_TLS,
+    USE_CREDENTIALS=settings.USE_CREDENTIALS,
+    VALIDATE_CERTS=True
+)
+
+async def send_verification_email(email: EmailStr, token: str):
+    """
+    Envía el link de verificación al usuario.
+    """
+    verification_url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+    
+    html = f"""
+    <div style="font-family: sans-serif; background-color: #020617; color: #f1f5f9; padding: 40px; border-radius: 20px;">
+        <h2 style="color: #38bdf8;">NIBAL<span style="color: #ffffff;">.INK</span></h2>
+        <p style="font-size: 16px;">Bienvenido al nodo de producción, operador.</p>
+        <p>Para activar tu cuenta y empezar a diseñar, hacé click en el siguiente botón:</p>
+        <a href="{verification_url}" 
+           style="display: inline-block; padding: 12px 24px; background-color: #38bdf8; color: #020617; 
+                  text-decoration: none; border-radius: 10px; font-weight: bold; margin-top: 20px;">
+           VERIFICAR CUENTA
+        </a>
+        <p style="font-size: 10px; color: #64748b; margin-top: 40px; border-top: 1px solid #1e293b; pt: 10px;">
+            Enviado desde Beelink S13 - Debian Trixie - UTN Avellaneda
+        </p>
+    </div>
+    """
+
+    message = MessageSchema(
+        subject="🚀 Activa tu cuenta en NIBAL.INK",
+        recipients=[email],
+        body=html,
+        subtype=MessageType.html
+    )
+
+    fm = FastMail(conf)
+    await fm.send_message(message)
+
+--- END OF FILE ---
+
+./app/services/file_service.py
+# backend_nibal-ink/app/services/file_service.py
+import os
+import uuid
+from fastapi import UploadFile, HTTPException
+from PIL import Image
+import io
+
+UPLOAD_DIR = "static/designs"
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
+
+def save_design_file(file: UploadFile) -> str:
+    # 1. Validacion de extension (Filtro rapido)
+    extension = file.filename.split(".")[-1].lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Extension de archivo no permitida.")
+
+    try:
+        # Leer el contenido en memoria
+        content = file.file.read()
+        
+        # 2. Validacion de integridad y limpieza de metadatos con Pillow
+        image = Image.open(io.BytesIO(content))
+        image.verify() # Verifica que sea una imagen valida
+        
+        # Re-abrimos para procesar (verify() cierra el archivo)
+        image = Image.open(io.BytesIO(content))
+        
+        # 3. Convertir a un formato estandar y "aplanar" (elimina perfiles ICC, EXIF, etc)
+        # Esto mata cualquier malware oculto en metadatos
+        if image.mode in ("RGBA", "P"):
+            image = image.convert("RGBA")
+        else:
+            image = image.convert("RGB")
+
+        # Generar nombre unico
+        file_name = f"{uuid.uuid4()}.webp" # Guardamos todo como webp por eficiencia
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+
+        if not os.path.exists(UPLOAD_DIR):
+            os.makedirs(UPLOAD_DIR)
+
+        # Guardar version "sanitizada"
+        image.save(file_path, "WEBP", quality=90)
+        
+        return f"/{UPLOAD_DIR}/{file_name}"
+
+    except Exception:
+        raise HTTPException(status_code=400, detail="El archivo esta corrupto o es malicioso.")
+--- END OF FILE ---
+
+./app/utils/username_generator_util.py
+# backend_nibal-ink/app/utils/username_generator_util.py
+
+import random
+
+def generate_elegant_username():
+    # Sustantivos abstractos y universales
+    sustantivos = [
+        "Prisma", "Eco", "Delta", "Nexo", "Zenit", 
+        "Fenix", "Orbe", "Aura", "Horizonte", "Cuarzo", 
+        "Ambar", "Vórtice", "Nova", "Eter", "Umbral"
+    ]
+    
+    # Adjetivos neutros (unisex)
+    adjetivos = [
+        "Astral", "Vital", "Noble", "Fugaz", "Eterno", 
+        "Zen", "Epico", "Libre", "Calmo", "Estelar", 
+        "Agil", "Radiante", "Infinita", "Sutil", "Versatil"
+    ]
+
+    sus = random.choice(sustantivos)
+    adj = random.choice(adjetivos)
+    
+    # Añadimos un numero pequeno para asegurar unicidad en la DB
+    num = random.randint(10, 99) 
+
+    # Retorna con espacio en lugar de guion bajo
+    return f"{sus} {adj} {num}"
+
+--- END OF FILE ---
+
+./app/main.py
+# backend_nibal-ink/app/main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.config_core import settings
+
+# Importacion de routers con la nueva nomenclatura
+from app.api.v1 import auth_v1, user_v1, design_v1
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version="1.0.0",
+    description="API para gestion de e-commerce de tazas personalizadas e impresion 3D",
+    openapi_url=f"{settings.API_VERSION_STR}/openapi.json"
+)
+
+# Configuracion de CORS
+if settings.CORS_ORIGINS_LIST:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[str(origin).rstrip("/") for origin in settings.CORS_ORIGINS_LIST],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # TEMPORAL para debuggear
+    # app.add_middleware(
+    #     CORSMiddleware,
+    #     allow_origins=["*"], # Permite cualquier origen
+    #     allow_credentials=True,
+    #     allow_methods=["*"],
+    #     allow_headers=["*"],
+    # )
+
+@app.get("/", tags=["Health Check"])
+async def root():
+    """Endpoint basico de salud del sistema."""
+    return {
+        "status": "online",
+        "message": f"Bienvenido a la API de {settings.PROJECT_NAME}",
+        "version": "v1"
+    }
+
+# --- REGISTRO DE ROUTERS ---
+
+# Rutas de Autenticacion (Login)
+app.include_router(
+    auth_v1.router, 
+    prefix=settings.API_VERSION_STR, 
+    tags=["Authentication"]
+)
+
+# Rutas de Usuarios (Registro y Perfil)
+app.include_router(
+    user_v1.router, 
+    prefix=f"{settings.API_VERSION_STR}/users", 
+    tags=["Users"]
+)
+
+# Rutas de Disenios (Tazas)
+app.include_router(
+    design_v1.router, 
+    prefix=f"{settings.API_VERSION_STR}/designs", 
+    tags=["Designs"]
+)
+--- END OF FILE ---
+
+./app/models/order_model.py
+# backend_nibal-ink/app/models/order_model.py
+import uuid
+from sqlalchemy import String, Float, ForeignKey, Text, DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.models.base_model import Base
+
+class OrderModel(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    total_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="pending") # pending, paid, shipped
+    
+    # Relaciones
+    buyer = relationship("UserModel")
+    items = relationship("OrderItemModel", back_populates="order")
+
+class OrderItemModel(Base):
+    __tablename__ = "order_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    quantity: Mapped[int] = mapped_column(default=1)
+    unit_price: Mapped[float] = mapped_column(Float)
+
+    order = relationship("OrderModel", back_populates="items")
+    # Link al regalo si este item es para obsequiar
+    gift_info = relationship("GiftModel", back_populates="order_item", uselist=False)
+
+class GiftModel(Base):
+    """
+    Esta es la tabla que consultara el destinatario del QR.
+    No requiere login, solo conocer el gift_token (UUID).
+    """
+    __tablename__ = "gifts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_item_id: Mapped[int] = mapped_column(ForeignKey("order_items.id"), unique=True)
+    
+    # El token que ira en el QR (nibal.ink/regalo/{gift_token})
+    gift_token: Mapped[uuid.UUID] = mapped_column(default=uuid.uuid4, unique=True, index=True)
+    
+    recipient_name: Mapped[str | None] = mapped_column(String(100))
+    message: Mapped[str | None] = mapped_column(Text)
+    
+    # Metadata para el visor 3D
+    model_url: Mapped[str | None] = mapped_column(String(500)) # Link al .glb
+    is_opened: Mapped[bool] = mapped_column(default=False) # Para avisar al comprador cuando lo escaneen
+
+    order_item = relationship("OrderItemModel", back_populates="gift_info")
+
+--- END OF FILE ---
+
+./app/models/user_model.py
+# backend_nibal-ink/app/models/user_model.py
+from sqlalchemy import String, Boolean, text
+from sqlalchemy.orm import Mapped, mapped_column
+from app.models.base_model import Base
+from datetime import datetime
+
+class UserModel(Base):
+    """
+    Modelo unico para la gestion de identidad en nibal.ink.
+    Maneja tanto clientes como administradores mediante flags de seguridad.
+    """
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    
+    # Datos de Identidad
+    user_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    
+    # Flags de Estado y Permisos
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # --- NUEVOS CAMPOS PARA EL FLUJO DE CONFIRMACIÓN ---
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)  # Para el email
+    role: Mapped[str] = mapped_column(String(20), server_default="user") # user, admin, guest
+    
+    # Auditoría (Fundamental para un Sysadmin)
+    created_at: Mapped[datetime] = mapped_column(server_default=text("TIMEZONE('utc', now())"))
+    # ---------------------------------------------------
+
+    # Informacion para e-commerce (opcional al registro)
+    phone_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    shipping_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<UserModel(email={self.email}, verified={self.is_verified}, admin={self.is_superuser})>"
+--- END OF FILE ---
+
+./app/models/base_model.py
+# backend_nibal-ink/app/models/base_model.py
+from datetime import datetime
+from sqlalchemy import func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase):
+    """
+    Clase base para todos los modelos del sistema.
+    Incluye campos de auditoria basicos de forma automatica.
+    """
+    # Columnas comunes para todas las tablas
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), 
+        onupdate=func.now()
+    )
+
+--- END OF FILE ---
+
+./app/api/deps_api.py
+# backend_nibal-ink/app/api/deps_api.py
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.config_core import settings
+from app.db.session_db import get_db_session
+from app.models.user_model import UserModel
+from app.schemas.auth_schema import TokenDataSchema
+
+# El path debe coincidir con tu ruta de login
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_VERSION_STR}/login")
+
+async def get_current_user(
+    db: AsyncSession = Depends(get_db_session),
+    token: str = Depends(oauth2_scheme)
+) -> UserModel:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudo validar el acceso.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenDataSchema(email=email)
+    except JWTError:
+        raise credentials_exception
+        
+    query = select(UserModel).where(UserModel.email == token_data.email)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+    
+    if user is None:
+        raise credentials_exception
+    return user
+
+--- END OF FILE ---
+
+./app/api/v1/auth_v1.py
+# backend_nibal-ink/app/api/v1/auth_v1.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.db.session_db import get_db_session
+from app.models.user_model import UserModel
+from app.services.auth_service import create_access_token, verify_password
+from app.schemas.auth_schema import TokenSchema
+
+router = APIRouter()
+
+@router.post("/login", response_model=TokenSchema)
+async def login_for_access_token(
+    # form_data sigue recibiendo 'username' (que es el email que el usuario escribe)
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db_session)
+):
+    # Buscamos en la DB comparando el email con form_data.username
+    query = select(UserModel).where(UserModel.email == form_data.username)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email o contrasenia incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # El "sub" del JWT sigue siendo el email
+    access_token = create_access_token(data={"sub": user.email})
+    
+    # IMPORTANTE: Aquí sí usamos user.user_name (el campo de tu UserModel)
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "username": user.user_name # <--- Este es el dato real de la DB
+    }
+--- END OF FILE ---
+
+./app/api/v1/deps_v1.py
+# backend_nibal-ink/app/api/deps_api.py
+from typing import AsyncGenerator
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.config_core import settings
+from app.db.session_db import get_db_session
+from app.models.user_model import UserModel
+from app.schemas.auth_schema import TokenDataSchema
+
+# Este objeto le dice a FastAPI que busque el token en el header 'Authorization'
+reusable_oauth2 = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_VERSION_STR}/login"
+)
+
+async def get_current_user(
+    db: AsyncSession = Depends(get_db_session),
+    token: str = Depends(reusable_oauth2)
+) -> UserModel:
+    """
+    Dependency que valida el token y retorna el objeto usuario de la DB.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudo validar el acceso",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(
+            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenDataSchema(email=email)
+    except JWTError:
+        raise credentials_exception
+
+    result = await db.execute(select(UserModel).where(UserModel.email == token_data.email))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise credentials_exception
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Usuario inactivo")
+    
+    return user
+
+def get_current_active_superuser(
+    current_user: UserModel = Depends(get_current_user),
+) -> UserModel:
+    """
+    Dependency adicional para rutas que requieren privilegios ninja (Admin).
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="El usuario no tiene suficientes privilegios"
+        )
+    return current_user
+
+--- END OF FILE ---
+
+./app/api/v1/design_v1.py
+# backend_nibal-ink/app/api/v1/design_v1.py
+from fastapi import APIRouter, HTTPException, Depends, status # Agregamos Depends y status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+import base64
+import uuid
+import os
+from io import BytesIO
+from PIL import Image
+
+# --- IMPORTACIONES DEL SISTEMA DE ESCUDOS (deps_api.py) ---
+from app.api.deps_api import get_current_user # El guardia de la puerta
+from app.models.user_model import UserModel     # El modelo de identidad
+
+router = APIRouter()
+UPLOAD_DIR = "uploads"
+
+class DesignUpload(BaseModel):
+    image_data: str 
+
+@router.post("/upload")
+async def upload_design(
+    design: DesignUpload,
+    # --- INYECCION DEL ESCUDO ---
+    current_user: UserModel = Depends(get_current_user) # EXIGIMOS LOGIN
+):
+    # --- REGLA NINJA DE ALTA SEGURIDAD ---
+    # Si el usuario no verifico su email via Resend (is_verified es 'f' en DB),
+    # el escudo lo rebota con un 403 Forbidden.
+    if not current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="VERIFICATION_REQUIRED"
+        )
+
+    # =========================================================================
+    # --- TU CÓDIGO ORIGINAL (INTACTO, SIN TOCAR UNA COMA) ---
+    # =========================================================================
+    try:
+        # 1. Decodificacion
+        if "base64," in design.image_data:
+            imgstr = design.image_data.split(";base64,")[1]
+        else:
+            imgstr = design.image_data
+        
+        image_bytes = base64.b64decode(imgstr)
+
+        # 2. SANITIZACION
+        try:
+            img = Image.open(BytesIO(image_bytes))
+            # No usamos verify() aquí porque queremos procesarla
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Imagen no válida")
+
+        # 3. Guardado seguro
+        file_name = f"design_{uuid.uuid4()}.webp"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+        img.save(file_path, "WEBP", quality=100, lossless=True) 
+
+        return {
+            "status": "success", 
+            "file_id": file_name,
+            "message": "Diseño en Alta Resolución guardado"
+        }
+    except HTTPException as he: # Capturamos excepciones HTTP que hayamos lanzado
+        raise he
+    except Exception as e: # Capturamos errores inesperados
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    # =========================================================================
+    # --- FIN DE TU CÓDIGO ORIGINAL ---
+    # =========================================================================
+
+@router.get("/list")
+async def list_designs(
+    # --- INYECCIÓN DEL ESCUDO ---
+    current_user: UserModel = Depends(get_current_user) # EXIGIMOS LOGIN PARA VER EL HISTORIAL
+):
+    """Retorna la lista de nombres de archivos guardados en la base de datos (Solo usuarios)"""
+    # ... (Tu código original de listado sigue aquí, protegido) ...
+    try:
+        if not os.path.exists(UPLOAD_DIR):
+            return []
+        
+        # Listamos archivos .webp y los ordenamos por fecha (el más reciente primero)
+        files = [f for f in os.listdir(UPLOAD_DIR) if f.endswith(".webp")]
+        files.sort(key=lambda x: os.path.getmtime(os.path.join(UPLOAD_DIR, x)), reverse=True)
+        
+        return files
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"No se pudo listar: {str(e)}")
+
+@router.get("/file/{file_id}")
+async def get_design_file(file_id: str):
+    """Sirve el archivo físico (Sigue siendo público para renderizar miniaturas)"""
+    # ... (Tu código original de servir archivo sigue igual) ...
+    if ".." in file_id or "/" in file_id:
+        raise HTTPException(status_code=400, detail="ID de archivo inválido")
+        
+    file_path = os.path.join(UPLOAD_DIR, file_id)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        
+    return FileResponse(file_path)
+
+@router.delete("/file/{file_id}")
+async def delete_design(
+    file_id: str,
+    # --- INYECCION DEL ESCUDO ---
+    current_user: UserModel = Depends(get_current_user) # EXIGIMOS LOGIN PARA BORRAR
+):
+    """Borra un diseño de la base de datos (Solo usuarios logueados)"""
+    # ... (Tu código original de borrado sigue igual, protegido) ...
+    file_path = os.path.join(UPLOAD_DIR, file_id)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        return {"status": "success", "message": f"Archivo {file_id} eliminado"}
+    raise HTTPException(status_code=404, detail="Archivo no encontrado")
+--- END OF FILE ---
+
+./app/api/v1/__init__.py
+# Este archivo puede quedar vacio, o podes exponer los routers explicitamente
+
+--- END OF FILE ---
+
+./app/api/v1/order_v1.py
+# backend_nibal-ink/app/api/v1/order_v1.py
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.session_db import get_db_session
+from app.api.deps_api import get_current_user
+from app.models.user_model import UserModel
+from app.models.order_model import OrderModel, OrderItemModel, GiftModel
+from app.services.file_service import save_design_file
+from app.schemas.order_schema import OrderCreateResponseSchema
+
+router = APIRouter()
+
+@router.post("/create", response_model=OrderCreateResponseSchema, status_code=status.HTTP_201_CREATED)
+async def create_order(
+    design_file: UploadFile = File(...),
+    total_amount: float = Form(...),
+    product_id: int = Form(...),
+    recipient_name: str = Form(None),
+    gift_message: str = Form(None),
+    db: AsyncSession = Depends(get_db_session),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Crea un pedido completo y sanitiza la imagen para produccion.
+    """
+    file_path = None
+    try:
+        # 1. Guardar y sanitizar archivo (Pillow se encarga de la seguridad)
+        file_path = save_design_file(design_file)
+        
+        # 2. Crear la Orden (Cabecera)
+        new_order = OrderModel(
+            buyer_id=current_user.id,
+            total_amount=total_amount,
+            status="paid" 
+        )
+        db.add(new_order)
+        await db.flush() 
+
+        # 3. Crear el item (Relacion entre producto y diseño)
+        new_item = OrderItemModel(
+            order_id=new_order.id,
+            product_id=product_id,
+            quantity=1,
+            unit_price=total_amount,
+            raw_image_url=file_path
+        )
+        db.add(new_item)
+        await db.flush()
+
+        # 4. Logica de Regalo (UUID dinámico para acceso QR)
+        gift_token = None
+        if recipient_name or gift_message:
+            new_gift = GiftModel(
+                order_item_id=new_item.id,
+                recipient_name=recipient_name,
+                message=gift_message,
+                model_url="/static/models/taza_base.glb"
+            )
+            db.add(new_gift)
+            await db.flush()
+            gift_token = new_gift.gift_token
+
+        await db.commit()
+
+        # Retornamos segun el esquema definido
+        return {
+            "order_id": new_order.id,
+            "status": new_order.status,
+            "gift_token": gift_token,
+            "file_path": file_path
+        }
+
+    except Exception as e:
+        await db.rollback()
+        # Si el archivo se guardo pero la DB fallo, como sysadmins deberiamos 
+        # implementar luego una limpieza de huerfanos, por ahora logueamos.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Error critico en la transaccion: {str(e)}"
+        )
+--- END OF FILE ---
+
+./app/api/v1/user_v1.py
+# backend_nibal-ink/app/api/v1/user_v1.py
+from datetime import timedelta
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
+from jose import jwt, JWTError
+
+from app.db.session_db import get_db_session
+from app.models.user_model import UserModel
+from app.schemas.user_schema import UserCreateSchema, UserResponseSchema
+from app.core.security_core import get_password_hash
+from app.core.config_core import settings
+from app.api.deps_api import get_current_user
+from app.services.auth_service import create_access_token
+from app.services.mail_service import send_verification_email
+
+router = APIRouter()
+
+@router.post("/register", response_model=UserResponseSchema, status_code=status.HTTP_201_CREATED)
+async def register_user(
+    user_in: UserCreateSchema,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Registra un nuevo cliente y dispara el email de verificacion.
+    """
+    # 1. Verificar existencia
+    query = select(UserModel).where(UserModel.email == user_in.email)
+    result = await db.execute(query)
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="El email ya se encuentra registrado en el nodo."
+        )
+    
+    # 2. Crear instancia
+    new_user = UserModel(
+        full_name=user_in.full_name,
+        email=user_in.email,
+        hashed_password=get_password_hash(user_in.password),
+        is_active=True,
+        is_verified=False,
+        is_superuser=False,
+        role="user"
+    )
+    
+    try:
+        db.add(new_user)
+        await db.commit()
+        await db.refresh(new_user)
+        
+        # 3. Generar token corto (24h) para el email
+        email_token = create_access_token(
+            data={"sub": new_user.email, "purpose": "email_verification"},
+            expires_delta=timedelta(hours=24)
+        )
+        
+        # 4. Enviar email en Background (Sysadmin style: no bloquea el response)
+        background_tasks.add_task(send_verification_email, new_user.email, email_token)
+        
+        return new_user
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Error critico en la base de datos de la Beelink."
+        )
+
+@router.get("/verify-email")
+async def verify_email(
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Endpoint que recibe el click del mail.
+    Corregido para asegurar el commit en la Beelink.
+    """
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        email: str = payload.get("sub")
+        purpose: str = payload.get("purpose")
+        
+        if email is None or purpose != "email_verification":
+            raise HTTPException(status_code=400, detail="Token invalido o malformado")
+    except JWTError:
+        raise HTTPException(status_code=400, detail="El link ha expirado o es invalido")
+
+    # 1. Buscamos al usuario explícitamente
+    result = await db.execute(select(UserModel).where(UserModel.email == email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado en el nodo")
+
+    # 2. Modificamos el objeto directamente (Esto marca la sesión como 'dirty')
+    if not user.is_verified:
+        user.is_verified = True
+        try:
+            # 3. Forzamos el guardado y confirmamos la transacción
+            await db.commit() 
+            # Opcional: refrescamos para estar seguros
+            await db.refresh(user) 
+        except Exception:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="Error al actualizar la base de datos")
+
+    return {
+        "status": "success", 
+        "message": f"¡Hola {user.full_name}! Email verificado correctamente. Ya podes operar."
+    }
+
+@router.get("/me", response_model=UserResponseSchema)
+async def read_users_me(
+    current_user: UserModel = Depends(get_current_user)
+):
+    return current_user
+--- END OF FILE ---
+
+./app/schemas/user_schema.py
+# backend_nibal-ink/app/schemas/user_schema.py
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from datetime import datetime
+from typing import Optional
+
+class UserBaseSchema(BaseModel):
+    email: EmailStr
+    full_name: str = Field(..., min_length=3, max_length=150)
+
+class UserCreateSchema(UserBaseSchema):
+    password: str = Field(..., min_length=8) # Seguridad mínima para el hash
+
+class UserUpdateSchema(BaseModel):
+    # Por si el usuario quiere completar estos datos después
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    shipping_address: Optional[str] = None
+
+class UserResponseSchema(UserBaseSchema):
+    id: int
+    is_active: bool
+    is_superuser: bool
+    is_verified: bool  # <--- CRÍTICO: El frontend lo necesita
+    role: str          # <--- Para saber si es user, admin o guest
+    created_at: datetime
+    
+    # Datos opcionales que también queremos devolver
+    phone_number: Optional[str] = None
+    shipping_address: Optional[str] = None
+
+    # Permite que Pydantic lea los atributos del modelo de SQLAlchemy
+    model_config = ConfigDict(from_attributes=True)
+--- END OF FILE ---
+
+./app/schemas/order_schema.py
+# backend_nibal-ink/app/schemas/order_schema.py
+from pydantic import BaseModel
+from typing import Optional
+import uuid
+
+class OrderCreateResponseSchema(BaseModel):
+    order_id: int
+    status: str
+    gift_token: Optional[uuid.UUID] = None  # Solo si fue un regalo
+    file_path: str
+
+    class Config:
+        from_attributes = True
+
+--- END OF FILE ---
+
+./app/schemas/auth_schema.py
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+
+class TokenSchema(BaseModel):
+    """Esquema que devuelve el JWT y datos del usuario al cliente"""
+    access_token: str
+    token_type: str
+    username: str  # <--- Agregado para que el front lo capture al loguear
+
+class TokenDataSchema(BaseModel):
+    """Datos que viajan dentro del payload del token"""
+    email: Optional[str] = None
+    username: Optional[str] = None # <--- Opcional: para identificar al usuario por nombre en el token
+    role: Optional[str] = None 
+
+class LoginSchema(BaseModel):
+    email: EmailStr
+    password: str
+--- END OF FILE ---
+

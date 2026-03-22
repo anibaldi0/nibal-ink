@@ -79,7 +79,7 @@ async def list_designs(
     # --- INYECCIÓN DEL ESCUDO ---
     current_user: UserModel = Depends(get_current_user) # EXIGIMOS LOGIN PARA VER EL HISTORIAL
 ):
-    """Retorna la lista de nombres de archivos guardados en la Beelink (Solo usuarios)"""
+    """Retorna la lista de nombres de archivos guardados en la base de datos (Solo usuarios)"""
     # ... (Tu código original de listado sigue aquí, protegido) ...
     try:
         if not os.path.exists(UPLOAD_DIR):

@@ -1,4 +1,3 @@
-// src/pages/LoginPage_page.tsx
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, UserPlus, LogIn, UserCircle } from 'lucide-react'; 
@@ -45,7 +44,7 @@ const LoginPage = () => {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState(''); 
+  const [fullName, setFullName] = useState(''); // Lo mandaremos como user_name al servicio
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -57,30 +56,46 @@ const LoginPage = () => {
 
     try {
       if (isRegister) {
+        // --- REGISTRO NORMALIZADO ---
+        // Mandamos fullName tal cual. El backend se encargará de validarlo 
+        // o generar uno si llega vacío (según tu lógica de register_user).
         await authService.register(email, password, fullName);
+        
         setMessage({ 
           type: 'success', 
-          text: 'Registro exitoso. Revisa tu email para activar tu cuenta antes de imprimir.' 
+          text: "Cuenta creada. Por favor, verifica tu email para operar el nodo." 
         });
+        
+        setTimeout(() => {
+          setIsRegister(false);
+          setMessage(null);
+          setFullName('');
+        }, 3000);
+        
       } else {
+        // --- LOGIN NORMALIZADO ---
         const data = await authService.login(email, password);
-        setLogin(data.access_token, email); 
         
-        // --- LÓGICA DE REDIRECCIÓN NINJA ---
-        // Buscamos si existe el parámetro 'redirect' (ej: /login?redirect=editor)
+        // Confiamos en lo que el backend nos devuelve en el campo 'username'
+        // que definimos en el TokenSchema del backend[cite: 488, 885].
+        setLogin(data.access_token, email, data.username); 
+        
         const redirectTo = searchParams.get('redirect');
-        
-        if (redirectTo === 'editor') {
-          navigate('/editor');
-        } else if (redirectTo === 'admin') {
-          navigate('/admin');
-        } else {
-          navigate('/'); // Default al Home
-        }
+        navigate(redirectTo === 'editor' ? '/editor' : redirectTo === 'admin' ? '/admin' : '/'); 
       }
+
     } catch (err: any) {
-      const errorDetail = err.response?.data?.detail || "Error de conexión con el nodo Beelink.";
-      setMessage({ type: 'error', text: `ERROR: ${errorDetail}` });
+      console.error("Error en auth:", err);
+      const rawError = err.response?.data?.detail;
+      let errorText = "Falla de comunicación con la Beelink S13";
+
+      if (Array.isArray(rawError)) {
+        errorText = rawError[0].msg;
+      } else if (typeof rawError === 'string') {
+        errorText = rawError;
+      }
+
+      setMessage({ type: 'error', text: errorText });
     } finally {
       setIsLoading(false);
     }
@@ -107,12 +122,12 @@ const LoginPage = () => {
           </div>
           <div>
             <h2 className="text-4xl font-black tracking-tighter text-white uppercase">
-              {isRegister ? 'Crear Nodo' : 'Acceso'}
+              {isRegister ? 'Nuevo Operador' : 'Identificación'}
             </h2>
             <p className={`text-[10px] font-mono uppercase tracking-[0.4em] font-bold transition-colors ${
               isRegister ? "text-emerald-400" : "text-sky-400"
             }`}>
-              {isRegister ? 'Registro de nuevo operador' : 'Identificación requerida'}
+              {isRegister ? 'Registro en el sistema' : 'Acceso requerido'}
             </p>
           </div>
         </div>
@@ -132,14 +147,14 @@ const LoginPage = () => {
             {isRegister && (
               <div className="animate-in slide-in-from-top-2 duration-300">
                 <InputField
-                  label="Nombre o Nick (Opcional)"
+                  label="Nombre de Artista / Nick"
                   type="text"
                   value={fullName}
                   onChange={setFullName}
-                  placeholder="Tu alias en el sistema"
+                  placeholder="Tu alias creativo"
                   icon={UserCircle}
                   isRegister={isRegister}
-                  required={false}
+                  required={false} 
                 />
               </div>
             )}
@@ -171,25 +186,26 @@ const LoginPage = () => {
             disabled={isLoading}
             className={`w-full py-5 text-white font-black rounded-2xl transition-all active:scale-[0.98] disabled:opacity-50 shadow-xl uppercase tracking-widest text-sm ${
               isRegister 
-                ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-900/20" 
-                : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 shadow-sky-900/20"
+                ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500" 
+                : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500"
             }`}
           >
-            {isLoading ? 'Sincronizando...' : isRegister ? 'Confirmar Registro' : 'Iniciar Sesión'}
+            {isLoading ? 'Sincronizando...' : isRegister ? 'Confirmar Operador' : 'Iniciar Sesión'}
           </button>
         </form>
 
         <div className="text-center pt-4">
           <button 
+            type="button"
             onClick={() => {
               setIsRegister(!isRegister);
               setMessage(null);
             }}
             className={`text-[11px] font-bold font-mono transition-colors uppercase tracking-widest underline-offset-8 hover:underline ${
-              isRegister ? "text-emerald-500 hover:text-emerald-300" : "text-slate-400 hover:text-white"
+              isRegister ? "text-emerald-500" : "text-slate-400 hover:text-white"
             }`}
           >
-            {isRegister ? '¿Ya sos operador? Logueate' : '¿No tenés cuenta? Solicitá acceso'}
+            {isRegister ? '¿Ya tienes cuenta? Acceder' : '¿No tienes cuenta? Regístrate'}
           </button>
         </div>
       </div>

@@ -13,13 +13,11 @@ router = APIRouter()
 
 @router.post("/login", response_model=TokenSchema)
 async def login_for_access_token(
+    # form_data sigue recibiendo 'username' (que es el email que el usuario escribe)
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """
-    Endpoint v1 para autenticacion.
-    Valida credenciales y devuelve un JWT.
-    """
+    # Buscamos en la DB comparando el email con form_data.username
     query = select(UserModel).where(UserModel.email == form_data.username)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
@@ -31,6 +29,12 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # El "sub" del JWT sigue siendo el email
     access_token = create_access_token(data={"sub": user.email})
     
-    return {"access_token": access_token, "token_type": "bearer"}
+    # IMPORTANTE: Aquí sí usamos user.user_name (el campo de tu UserModel)
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "username": user.user_name # <--- Este es el dato real de la DB
+    }
