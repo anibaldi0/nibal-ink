@@ -1,0 +1,16 @@
+
+/* /src/styles/themes/dark_mode_theme.css */
+
+.dark {
+  --bg-main: #282e4b;        /* Slate 950 */
+  --bg-card: rgba(30, 41, 59, 0.4); 
+  --text-main: #f1f5f9;      /* Slate 100 */
+  --text-muted: #a4b5d6;     /* Slate 400 */
+  --color-primary: #6366f1;  /* Indigo 500 */
+  --color-accent: #38bdf8;   /* Sky 400 */
+  --border-color: #1e293b;   /* Slate 800 */
+  --shadow-color: rgba(0, 0, 0, 0.15); /* Sombra negra muy suave */
+  --glow-color: rgba(79, 70, 229, 0.5);   /* Brillo violeta sutil */
+  --bg-toggle: #ffc400;      /* Slate 800 (Azul muy oscuro) */
+  --icon-toggle: #343500;    /* Yellow 400 (Amarillo brillante para el sol) */
+}

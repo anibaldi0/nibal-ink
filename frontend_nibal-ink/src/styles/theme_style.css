@@ -1,28 +1,191 @@
-/* src/styles/theme_style.css */
+/* IMPORTANTE: Los temas van antes de las directivas de tailwind */
+@import "./themes/light_mode_theme.css";
+@import "./themes/dark_mode_theme.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* CORRECCIÓN GLOBAL: Fondo para todo el viewport */
+@layer base {
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    @apply transition-colors duration-500;
+  }
+}
+
 @layer components {
+  /* --- ESTRUCTURA GLOBAL --- */
+  .page-main-layout {
+    @apply space-y-32 pb-20 max-w-7xl mx-auto transition-colors duration-500 px-4;
+  }
+
+  /* --- HEADER --- */
   .header-main {
-    @apply sticky top-0 z-50 w-full transition-all duration-500 backdrop-blur-xl border-b;
-    @apply bg-white/80 border-slate-200 text-slate-900;
-    @apply dark:bg-slate-950/80 dark:border-slate-800/60 dark:text-slate-100;
+    background-color: var(--bg-main);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-main);
+    @apply sticky top-0 z-50 w-full backdrop-blur-xl transition-all duration-500 px-6 py-4 md:px-10;
+  }
+
+  .logo-link { @apply flex items-center gap-3 transition-transform active:scale-95; }
+  
+  .logo-img {
+    @apply h-12 md:h-14 w-auto object-contain transition-all duration-300;
+    filter: drop-shadow(0 0 1px var(--color-accent))
+            drop-shadow(0 0 10px var(--glow-color));
+    opacity: 0.95;
+  }
+
+  .logo-link:hover .logo-img {
+    @apply opacity-100 scale-105;
+    filter: drop-shadow(0 0 2px var(--color-accent));
   }
 
   .nav-link-art {
-    @apply text-[10px] font-mono uppercase tracking-[0.2em] transition-colors cursor-pointer;
-    @apply text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-sky-400;
+    @apply text-[15px] font-mono uppercase tracking-[0.2em] transition-colors cursor-pointer font-bold;
+    @apply text-slate-400 hover:text-indigo-600 dark:hover:text-sky-400;
+  }
+
+  .nav-divider { @apply h-6 w-[1px] bg-slate-400 dark:bg-slate-500; }
+
+  .btn-access {
+    background-color: var(--color-primary);
+    @apply px-6 py-2 rounded-full font-bold text-white text-[11px] uppercase tracking-widest transition-all hover:scale-105;
   }
 
   .theme-switcher {
-    @apply p-2 rounded-xl border transition-all active:scale-90 flex items-center justify-center;
-    @apply border-slate-200 bg-slate-100 text-slate-600 hover:bg-white;
-    @apply dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800;
+    background-color: var(--bg-toggle);
+    color: var(--icon-toggle);
+    @apply p-2 rounded-xl transition-all duration-500 active:scale-90 flex items-center justify-center border-none shadow-md;
+  }
+
+  .dark .theme-switcher {
+    @apply shadow-[0_0_12px_rgba(250,204,21,0.3)];
+  }
+
+  /* --- MENÚ MÓVIL (NUEVO CÓDIGO AQUÍ) --- */
+  .mobile-menu-backdrop {
+    @apply fixed inset-0 z-[60] bg-slate-950/50 backdrop-blur-sm transition-opacity duration-300;
   }
 
   .mobile-overlay {
-    @apply fixed inset-0 z-[60] flex flex-col items-center justify-center space-y-10 transition-all duration-500;
-    @apply bg-white dark:bg-slate-950;
+    @apply fixed inset-y-0 left-0 z-[70] w-full max-w-xs flex flex-col items-center justify-center space-y-10 shadow-2xl transition-all duration-300;
+    background-color: var(--bg-main);
+    animation: slide-right 0.3s ease-out;
   }
+
+  .mobile-nav-link {
+    @apply text-3xl font-black uppercase tracking-tighter transition-colors;
+    color: var(--text-main);
+  }
+
+  @keyframes slide-right {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+
+  /* --- FOOTER --- */
+  .footer-main {
+    background-color: var(--bg-main);
+    border-top: 1px solid var(--border-color);
+    color: var(--text-main);
+    @apply w-full py-16 transition-all duration-500 mt-20;
+  }
+
+  .footer-logo {
+    @apply h-12 md:h-14 w-auto object-contain transition-all duration-300;
+    filter: drop-shadow(0 0 4px var(--color-primary));
+    opacity: 0.9;
+  }
+
+  .footer-text {
+    color: var(--text-muted);
+    @apply text-sm font-mono leading-relaxed;
+  }
+
+  .footer-label {
+    color: var(--text-muted);
+    @apply text-[12px] font-mono uppercase tracking-[0.4em] mb-4 opacity-70;
+  }
+
+  .footer-stack-item {
+    color: var(--text-main);
+    @apply text-sm font-bold transition-colors hover:text-sky-500 dark:hover:text-sky-400;
+  }
+
+  .footer-server-tag {
+    color: var(--color-accent);
+    @apply text-base font-black uppercase tracking-tight;
+  }
+
+  .footer-link {
+    color: var(--color-accent);
+    @apply transition-colors underline underline-offset-4 font-bold decoration-sky-500/30 hover:text-sky-300;
+  }
+
+  /* --- LANDING --- */
+  .hero-container {
+    @apply flex flex-col items-center justify-center pt-32 pb-20 min-h-[70vh] text-center space-y-12 relative overflow-hidden;
+  }
+
+  .node-badge {
+    @apply inline-block px-4 py-1.5 rounded-full border text-[10px] font-mono tracking-[0.3em] uppercase animate-pulse;
+    @apply border-sky-500/30 bg-sky-500/10 text-sky-500;
+  }
+
+  .hero-title {
+    color: var(--text-main);
+    @apply text-7xl md:text-9xl font-black leading-[0.9] tracking-tighter;
+  }
+
+  .hero-gradient-text {
+    @apply text-transparent bg-clip-text bg-gradient-to-r italic from-sky-400 to-emerald-400;
+  }
+
+  .hero-description {
+    color: var(--text-muted);
+    @apply text-xl md:text-2xl max-w-2xl mx-auto leading-relaxed font-light;
+  }
+
+  .hero-actions { @apply flex flex-col sm:flex-row gap-6 justify-center pt-8 w-full max-w-lg; }
+
+  .btn-secondary-art {
+    border: 2px solid var(--border-color);
+    color: var(--text-muted);
+    @apply px-10 py-5 font-black rounded-2xl transition-all text-sm uppercase tracking-[0.2em] text-center hover:bg-slate-100 dark:hover:bg-slate-900;
+  }
+
+  .hero-glow-effect {
+    @apply absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] blur-[120px] -z-10 rounded-full opacity-20;
+    @apply bg-sky-500 dark:bg-sky-500/10;
+  }
+
+  /* --- VITRINA --- */
+  .vitrina-section { @apply space-y-16; }
+  .vitrina-header { @apply flex flex-col md:flex-row justify-between items-end gap-6 border-b pb-8 border-slate-200 dark:border-slate-800; }
+  .section-title { color: var(--text-main); @apply text-4xl font-black uppercase tracking-tighter; }
+  .vitrina-grid { @apply grid grid-cols-1 md:grid-cols-3 gap-10; }
+
+  .vitrina-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    @apply relative rounded-[40px] p-8 transition-all duration-500 hover:-translate-y-2 shadow-sm;
+  }
+
+  .vitrina-card-overlay {
+    @apply absolute inset-0 transition-opacity duration-500 opacity-0 group-hover:opacity-100 z-10;
+    @apply bg-gradient-to-b from-transparent to-slate-200/50 dark:to-slate-950/90;
+  }
+
+  .vitrina-card-number {
+    @apply font-black text-7xl opacity-10 select-none text-slate-400 dark:text-slate-700;
+  }
+
+  .status-badge {
+    @apply px-3 py-1 rounded-full text-[9px] font-bold font-mono uppercase tracking-widest border border-emerald-500/20 bg-emerald-500/10 text-emerald-600;
+  }
+
+  .product-name { color: var(--text-main); @apply font-bold text-xl tracking-tight; }
 }

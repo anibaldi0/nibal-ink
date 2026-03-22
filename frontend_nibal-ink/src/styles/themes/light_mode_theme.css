@@ -1,0 +1,17 @@
+
+/* /src/styles/themes/light_mode_theme.css */
+
+:root {
+    /* Paleta UI Colors - Indigo/Sky */
+  --bg-main: #f8fafc;        /* Slate 50 */
+  --bg-card: #ffffff;
+  --text-main: #0f172a;      /* Slate 900 */
+  --text-muted: #64748b;     /* Slate 500 */
+  --color-primary: #4f46e5;  /* Indigo 600 */
+  --color-accent: #0ea5e9;   /* Sky 500 */
+  --border-color: #e2e8f0;   /* Slate 200 */
+  --shadow-color: rgba(255, 255, 255, 0.1); /* Sombra blanca muy suave */
+  --glow-color: rgba(56, 189, 248, 0.6);   /* Brillo cian potente (UI Colors) */
+  --bg-toggle: #004bad;      /* Slate 200 (Gris claro) */
+  --icon-toggle: #ffffff;    /* Slate 800 (Casi negro para la luna) */
+}
