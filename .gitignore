@@ -17,3 +17,7 @@ backend_nibal-ink/*.pyc
 
 # OS
 .DS_Store
+
+#respaldo de codigos
+respaldo_completo_nibalink.txt
+respaldo_frontend_nibalink.txt
